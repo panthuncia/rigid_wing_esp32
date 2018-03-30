@@ -170,8 +170,12 @@ void sendBoatMessage(int wind, int servoPos, int volt) {
 
 String addZerosToString(int n, int z) {
   String result = String(n);
+  if (n > 999) {
+    return "999";
+  }
 
   int s = 10;
+  int ii = 0;
 
   while (s < pow(10, z)) {
     if (s >= n) {
