@@ -8,6 +8,7 @@ The trim tab controller communicates with the main control system located in the
 ## Dependencies
 - ArduinoBLE
 - arduino-timer
+- Battery Sense
 
 Before you can compile the firmware, you'll need to install the libraries listed above. You can do this from within the Arduino IDE, by going to `Tools` > `Manage Libraries...`.
 

@@ -4,13 +4,10 @@
  * @author Connor Burri (cjburri@wpi.edu) - 2020/2021
  * @author Tom Nurse (tjnurse@wpi.edu) - 2021/2022
  * @brief File containing the execution code for the controller embedded within the adjustable trim tab
- * @version 2.0.1
- * @date 2021-11-04
- * @copyright Copyright (c) 2021
+ * @version 2.0.2
+ * @date 2022-1-26
+ * @copyright Copyright (c) 2022
  */
-
-// FOR TESTING ONLY - Remove afterwards
-double count = 0;
 
 /* Custom struct for the possible states that the trim tab can be in */
 typedef enum _TrimState_TRIM_STATE {
@@ -29,6 +26,10 @@ typedef enum _TrimState_TRIM_STATE {
 #include <ArduinoBLE.h>                       // Library for handling Bluetooth Low Energy (BLE) communications
 #include <Servo.h>                            // Driver code for operating servo
 #include <arduino-timer.h>                    // Library to handle non-blocking function calls at a set interval
+#include <Battery.h>                          // Library for monitoring battery level 
+
+/* Battery */
+Battery battery = Battery(3000, 4200, batteryPin);
 
 /* BLE variables */
 BLEService batteryService("180F");            // Using Bluetooth assigned UUID for Battery service
@@ -58,7 +59,9 @@ void setup()
   pinMode(bleLED, OUTPUT);                    // LED next to the button (2nd from front)
   pinMode(led1Pin, OUTPUT);                   // LED next to the wifi led (3rd from front)
   pinMode(led2Pin, OUTPUT);                   // LED next to led1Pin (4th from front)
-  
+
+  /* Set up battery monitoring */
+  battery.begin(3300, 1.43, &sigmoidal);
   
   /* Initializing variables to initial conditions */
   ledState = LOW;                             // LED starts in off position
@@ -67,6 +70,7 @@ void setup()
   
   /* Starting the serial monitor */
   Serial.begin(115200);
+  delay(1000);
 
   /* Giving feedback that the power is on */
   digitalWrite(powerLED, HIGH);
@@ -132,7 +136,6 @@ void loop()
     while (central.connected()) {
       if (tabState.written()) {
         if (tabState.value() || tabState.value() == 0) {
-          count++;
           state = (TrimState_TRIM_STATE)tabState.value();
         }
       }
@@ -143,8 +146,7 @@ void loop()
         }
       }
 
-      // TODO: Determine battery level
-      batteryLevel.writeValue(100);
+      batteryLevel.writeValue(battery.level());
 
       if (windAngle) {
         windDirection.writeValue(windAngle);
@@ -156,10 +158,6 @@ void loop()
 
     digitalWrite(bleLED, LOW);
     Serial.println("Client disconnected");
-    
-    // FOR TESTING - Remove afterwards
-    Serial.print("Received: ");
-    Serial.println(count);
   }
   
   servoTimer.tick();
