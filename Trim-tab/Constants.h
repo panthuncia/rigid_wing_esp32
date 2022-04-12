@@ -4,10 +4,10 @@
  * @author Connor Burri (cjburri@wpi.edu) - 2020/2021
  * @author Tom Nurse (tjnurse@wpi.edu) - 2021/2022
  * @brief File containing variables common to the entire system, centralizing the settings of the sailbot
- * @version 2.0.1
- * @date 2021-11-14
+ * @version 2.0.2
+ * @date 2022-4-11
  * 
- * @copyright Copyright (c) 2021
+ * @copyright Copyright (c) 2022
  * 
  */
 
@@ -29,12 +29,11 @@ const int POT_HEADWIND = 463;
 const int MAX_LIFT_ANGLE = 30;
 
 /* Pins */
-const int potPin    = A0;             //A19
-const int batteryPin = 17;            //Battery V+
-const int servoPin  = 16;             //Servo
-const int led1Pin   = 4;              //white
-const int led2Pin   = 5;              //white
-const int bleLED   = LED_BUILTIN;     //yellow
-const int powerLED  = 7;              //red
+const int potPin = A0;              //A19
+const int batteryPin = 17;          //Battery V+
+const int servoPin = 16;            //Servo
+const int errorLED = 4;             //red
+const int bleLED = 3;               //blue
+const int powerLED = 5;             //green
 
 #endif

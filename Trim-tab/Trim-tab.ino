@@ -5,7 +5,7 @@
  * @author Tom Nurse (tjnurse@wpi.edu) - 2021/2022
  * @brief File containing the execution code for the controller embedded within the adjustable trim tab
  * @version 2.0.2
- * @date 2022-1-26
+ * @date 2022-4-11
  * @copyright Copyright (c) 2022
  */
 
@@ -45,6 +45,8 @@ BLEStringCharacteristic manufacturerString("2A29", BLERead, 64);    // Using Blu
 
 /* Control variables */
 volatile int ledState;                        // For controlling the state of an LED
+bool batteryWarning = false;                  // If True, battery level is low (at or below 20%)
+bool bleConnected = false;                    // Set to True if a device is connected
 auto LEDTimer = timer_create_default();       // Sets the LED timer function to be called asynchronously on an interval
 auto servoTimer = timer_create_default();     // Sets the servo timer function to be called asynchronously on an interval
 Servo servo;                                  // Servo object
@@ -55,10 +57,9 @@ TrimState_TRIM_STATE state;                   // The variable responsible for kn
 void setup()
 {
   /* Setting the mode of the pins necessary */
-  pinMode(powerLED, OUTPUT);                  // LED on the button
-  pinMode(bleLED, OUTPUT);                    // LED next to the button (2nd from front)
-  pinMode(led1Pin, OUTPUT);                   // LED next to the wifi led (3rd from front)
-  pinMode(led2Pin, OUTPUT);                   // LED next to led1Pin (4th from front)
+  pinMode(powerLED, OUTPUT);                  // Green LED
+  pinMode(bleLED, OUTPUT);                    // Blue LED
+  pinMode(errorLED, OUTPUT);                  // Red LED
 
   /* Set up battery monitoring */
   battery.begin(3300, 1.43, &sigmoidal);
@@ -79,10 +80,13 @@ void setup()
   if (!BLE.begin()) {
     Serial.println("BLE: Failed to start :(");
     while (1) {
-      digitalWrite(bleLED, HIGH);
-      delay(1000);
-      digitalWrite(bleLED, LOW);
-      delay(1000);
+      for (int i = 0; i < 3; i++) {
+        digitalWrite(errorLED, HIGH);
+        delay(500);
+        digitalWrite(errorLED, LOW);
+        delay(500);
+      }
+      delay(2000);
     }
   }
 
@@ -109,7 +113,7 @@ void setup()
   BLE.advertise();                                // Start BLE
   Serial.println("BLE: Advertising");
 
-  versionString.writeValue("2.0.1");              // Software version
+  versionString.writeValue("2.0.2");              // Software version
   manufacturerString.writeValue("Worcester Polytechnic Institute - Robotics Engineering");
   
   /* Initializing the servo and setting it to its initial condition */
@@ -118,7 +122,7 @@ void setup()
 
   /* Starting the asynchronous function calls */
   servoTimer.every(10, servoControl);
-  LEDTimer.every(10, blinkState);
+  LEDTimer.every(1000, blinkState);
 }
 
 void loop()
@@ -127,13 +131,12 @@ void loop()
 
   /* If a device is connected */
   if (central) {
-    digitalWrite(bleLED, HIGH);
-
-	// Print BLE address
+	  // Print BLE address
     Serial.print("Connected to ");
     Serial.println(central.address());
     
     while (central.connected()) {
+      bleConnected = true;
       if (tabState.written()) {
         if (tabState.value() || tabState.value() == 0) {
           state = (TrimState_TRIM_STATE)tabState.value();
@@ -148,6 +151,12 @@ void loop()
 
       batteryLevel.writeValue(battery.level());
 
+      if (battery.level() < 20) {
+        batteryWarning = true;
+      }else{
+        batteryWarning = false;
+      }
+
       if (windAngle) {
         windDirection.writeValue(windAngle);
       }
@@ -156,7 +165,7 @@ void loop()
       LEDTimer.tick();
     }
 
-    digitalWrite(bleLED, LOW);
+    bleConnected = false;
     Serial.println("Client disconnected");
   }
   
@@ -181,8 +190,8 @@ bool servoControl(void *)
   //Serial.println(windAngle);
   
   // Set debug LEDs to on to indicate servo control is active
-  digitalWrite(led1Pin, HIGH);
-  digitalWrite(led2Pin, HIGH);
+  // digitalWrite(led1Pin, HIGH);
+  // digitalWrite(led2Pin, HIGH);
 
   // Write servo position to one read from the Arduino
   //  servo.write(SERVO_CTR + control_angle - 200 - 90);
@@ -231,42 +240,101 @@ bool servoControl(void *)
 
 /**
  * @author Irina Lavryonova
+ * @author Tom Nurse
  * @brief controls the blinking operations within the LEDS
- * @TODO: send this state to the telemetry interface
  */ 
 bool blinkState(void *)
 {
   // Toggle state
   ledState = ledState == LOW ? HIGH : LOW;
 
+  digitalWrite(powerLED, HIGH);
+
+  if (batteryWarning) {
+    digitalWrite(errorLED, HIGH);
+  }
+
+  if (bleConnected) {
+    digitalWrite(bleLED, ledState);
+  }else{
+    digitalWrite(bleLED, LOW);
+  }
+
   switch(state){
     case TrimState_TRIM_STATE_MAX_LIFT_PORT:
-      digitalWrite(led1Pin, HIGH);
-      digitalWrite(led2Pin, LOW);
+      digitalWrite(powerLED, ledState);
       break;
     case TrimState_TRIM_STATE_MAX_LIFT_STBD:
-      digitalWrite(led1Pin, ledState);
-      digitalWrite(led2Pin, LOW);
+      if (ledState == HIGH) {
+        delay(100);
+        digitalWrite(powerLED, LOW);
+        delay(100);
+        digitalWrite(powerLED, HIGH);
+        delay(100);
+        digitalWrite(powerLED, LOW);
+      }else{
+        digitalWrite(powerLED, LOW);
+      }
       break;
     case TrimState_TRIM_STATE_MAX_DRAG_PORT:
-      digitalWrite(led1Pin, LOW);
-      digitalWrite(led2Pin, HIGH);
+      if (ledState == HIGH) {
+        delay(100);
+        digitalWrite(powerLED, LOW);
+        delay(100);
+        digitalWrite(powerLED, HIGH);
+        delay(100);
+        digitalWrite(powerLED, LOW);
+        delay(100);
+        digitalWrite(powerLED, HIGH);
+        delay(100);
+        digitalWrite(powerLED, LOW);
+      }else{
+        digitalWrite(powerLED, LOW);
+      }
       break;
     case TrimState_TRIM_STATE_MAX_DRAG_STBD:
-      digitalWrite(led1Pin, LOW);
-      digitalWrite(led2Pin, ledState);
+      if (ledState == HIGH) {
+        delay(100);
+        digitalWrite(powerLED, LOW);
+        delay(100);
+        digitalWrite(powerLED, HIGH);
+        delay(100);
+        digitalWrite(powerLED, LOW);
+        delay(100);
+        digitalWrite(powerLED, HIGH);
+        delay(100);
+        digitalWrite(powerLED, LOW);
+        delay(100);
+        digitalWrite(powerLED, HIGH);
+        delay(100);
+        digitalWrite(powerLED, LOW);
+      }else{
+        digitalWrite(powerLED, LOW);
+      }
       break;
     case TrimState_TRIM_STATE_MIN_LIFT:
-      digitalWrite(led1Pin, LOW);
-      digitalWrite(led2Pin, LOW);
+      if (ledState == HIGH) {
+        delay(100);
+        digitalWrite(powerLED, LOW);
+        delay(100);
+        digitalWrite(powerLED, HIGH);
+        delay(100);
+        digitalWrite(powerLED, LOW);
+      }else{
+        digitalWrite(powerLED, HIGH);
+        delay(100);
+        digitalWrite(powerLED, LOW);
+        delay(100);
+        digitalWrite(powerLED, HIGH);
+        delay(100);
+        digitalWrite(powerLED, LOW);
+      }
       break;
     case TrimState_TRIM_STATE_MANUAL:
-      digitalWrite(led1Pin, HIGH);
-      digitalWrite(led2Pin, HIGH);
+      digitalWrite(powerLED, HIGH);
       break;
     default:
-      digitalWrite(led1Pin, HIGH);
-      digitalWrite(led2Pin, HIGH);
+      // Water is wet
       break;
   }
 
