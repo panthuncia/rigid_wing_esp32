@@ -3,10 +3,11 @@
  * @author Irina Lavryonova (ilavryonova@wpi.edu) - 2019/2020
  * @author Connor Burri (cjburri@wpi.edu) - 2020/2021
  * @author Tom Nurse (tjnurse@wpi.edu) - 2021/2022
+ * @author Matthew Gomes (mhgomes@wpi.edu) - 2023-2024
  * @brief File containing the execution code for the controller embedded within the adjustable trim tab
  * @version 2.0.2
- * @date 2022-4-11
- * @copyright Copyright (c) 2022
+ * @date 2023-11-12
+ * @copyright Copyright (c) 2023
  */
 
 /* Custom struct for the possible states that the trim tab can be in */
@@ -23,26 +24,29 @@ typedef enum _TrimState_TRIM_STATE {
 #include "Constants.h"
 
 /* Libraries */
-#include <ArduinoBLE.h>                       // Library for handling Bluetooth Low Energy (BLE) communications
-#include <Servo.h>                            // Driver code for operating servo
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+#include <BLE2902.h>  // This is needed for notifications
+
+#include <ESP32Servo.h>                            // Driver code for operating servo
 #include <arduino-timer.h>                    // Library to handle non-blocking function calls at a set interval
 #include <Battery.h>                          // Library for monitoring battery level 
 
 /* Battery */
 Battery battery = Battery(3000, 4200, batteryPin);
 
-/* BLE variables */
-BLEService batteryService("180F");            // Using Bluetooth assigned UUID for Battery service
-BLEService sttService("1819");                // Using Bluetooth assigned UUID for Location and Navigation service (0x1819)
-BLEService deviceInfoService("180A");         // Using Bluetooth assigned UUID for Device Information service
+/* BLE */
+BLECharacteristic *windDirection;
+BLECharacteristic *batteryLevel;
+BLECharacteristic *tabState;
+BLECharacteristic *tabAngle;
+BLECharacteristic *versionString;
+BLECharacteristic *manufacturerString;
 
-BLEFloatCharacteristic windDirection("2A73", BLERead | BLENotify);  // Using Bluetooth assigned UUID for apparent wind direction (0x2A73)
-BLEIntCharacteristic batteryLevel("2A19", BLERead | BLENotify);     // Using Bluetooth assigned UUID for battery level (0x2A19)
-BLEIntCharacteristic tabState("2A6A", BLEWrite);                    // Using Bluetooth assigned UUID for Location and Navigation Feature (0x2A6A) -> Trim Tab State
-BLEIntCharacteristic tabAngle("2A6B", BLEWrite);                    // Using Bluetooth assigned UUID for Location and Navigation Control Point (0x2A6B) -> Manual Angle
-BLEStringCharacteristic versionString("2A28", BLERead, 20);         // Using Bluetooth assigned UUID for Software Revision String
-BLEStringCharacteristic manufacturerString("2A29", BLERead, 64);    // Using Bluetooth assigned UUID for Manufacturer Name String
-
+BLEService *sttService;
+BLEService *batteryService;
+BLEService *deviceInfoService;
 /* Control variables */
 volatile int ledState;                        // For controlling the state of an LED
 bool batteryWarning = false;                  // If True, battery level is low (at or below 20%)
@@ -60,7 +64,7 @@ void setup()
   pinMode(powerLED, OUTPUT);                  // Green LED
   pinMode(bleLED, OUTPUT);                    // Blue LED
   pinMode(errorLED, OUTPUT);                  // Red LED
-
+  //BLE.setSupervisionTimeout(100); //not available in esp32 BLE?
   /* Set up battery monitoring */
   battery.begin(3300, 1.43, &sigmoidal);
   
@@ -77,44 +81,78 @@ void setup()
   digitalWrite(powerLED, HIGH);
 
   /* Set up BLE */
-  if (!BLE.begin()) {
-    Serial.println("BLE: Failed to start :(");
-    while (1) {
-      for (int i = 0; i < 3; i++) {
-        digitalWrite(errorLED, HIGH);
-        delay(500);
-        digitalWrite(errorLED, LOW);
-        delay(500);
-      }
-      delay(2000);
-    }
-  }
+  // if (!BLE.begin()) {
+  //   Serial.println("BLE: Failed to start :(");
+  //   while (1) {
+  //     for (int i = 0; i < 3; i++) {
+  //       digitalWrite(errorLED, HIGH);
+  //       delay(500);
+  //       digitalWrite(errorLED, LOW);
+  //       delay(500);
+  //     }
+  //     delay(2000);
+  //   }
+  // } //not needed?
 
-  BLE.setDeviceName("Sailbot - Trim Tab");        // The device name characteristic
-  BLE.setLocalName("Sailbot - Trim Tab");
-  BLE.setAdvertisedService(sttService);           // Sets the primary advertised service
+  BLEDevice::init("Sailbot - Trim Tab"); // Name your device
+  BLEServer *pServer = BLEDevice::createServer();
+  //BLE.setAdvertisedService(sttService);           // Sets the primary advertised service
+  BLEService *sttService = pServer->createService("1819");
+  BLEService *batteryService = pServer->createService("180F");
+  BLEService *deviceInfoService = pServer->createService("180A");
 
   Serial.print("Device address: ");
-  Serial.println(BLE.address());
+  //Serial.println(BLE.address());
   
-  sttService.addCharacteristic(windDirection);    // Add characteristics to their respective services
-  sttService.addCharacteristic(tabState);
-  sttService.addCharacteristic(tabAngle);
-  batteryService.addCharacteristic(batteryLevel);
-  deviceInfoService.addCharacteristic(versionString);
-  deviceInfoService.addCharacteristic(manufacturerString);
+  // Create BLE Characteristics
+  windDirection = batteryService->createCharacteristic(
+                                    "2A73",
+                                    BLECharacteristic::PROPERTY_READ | 
+                                    BLECharacteristic::PROPERTY_NOTIFY
+                                  );
+  batteryLevel = batteryService->createCharacteristic(
+                                    "2A19",
+                                    BLECharacteristic::PROPERTY_READ | 
+                                    BLECharacteristic::PROPERTY_NOTIFY
+                                  );
+  tabState = sttService->createCharacteristic(
+                                "2A6A",
+                                BLECharacteristic::PROPERTY_WRITE
+                              );
+  tabAngle = sttService->createCharacteristic(
+                                "2A6B",
+                                BLECharacteristic::PROPERTY_WRITE
+                              );
+  versionString = deviceInfoService->createCharacteristic(
+                                      "2A28",
+                                      BLECharacteristic::PROPERTY_READ
+                                    );
+  manufacturerString = deviceInfoService->createCharacteristic(
+                                          "2A29",
+                                          BLECharacteristic::PROPERTY_READ
+                                        );
+
   
-  tabState.writeValue(state);
+  windDirection->addDescriptor(new BLE2902());
+  batteryLevel->addDescriptor(new BLE2902());
+  int current_state = state;
+  tabState->setValue(current_state);
 
-  BLE.addService(deviceInfoService);              // Add the services
-  BLE.addService(batteryService);
-  BLE.addService(sttService);
+  deviceInfoService->start();
+  batteryService->start();
+  sttService->start();
 
-  BLE.advertise();                                // Start BLE
+  BLEAdvertising *pAdvertising = pServer->getAdvertising();
+  pAdvertising->addServiceUUID(batteryService->getUUID());
+  pAdvertising->addServiceUUID(sttService->getUUID());
+  pAdvertising->addServiceUUID(deviceInfoService->getUUID());
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);  // Functions that help with iPhone connections issue
+  BLEDevice::startAdvertising();                               // Start BLE
   Serial.println("BLE: Advertising");
 
-  versionString.writeValue("2.0.2");              // Software version
-  manufacturerString.writeValue("Worcester Polytechnic Institute - Robotics Engineering");
+  versionString->setValue("2.0.2");              // Software version
+  manufacturerString->setValue("Worcester Polytechnic Institute - Robotics Engineering");
   
   /* Initializing the servo and setting it to its initial condition */
   servo.attach(servoPin);
@@ -127,50 +165,36 @@ void setup()
 
 void loop()
 {
-  BLEDevice central = BLE.central();
-
-  /* If a device is connected */
-  if (central) {
-	  // Print BLE address
-    Serial.print("Connected to ");
-    Serial.println(central.address());
-    
-    while (central.connected()) {
-      bleConnected = true;
-      if (tabState.written()) {
-        if (tabState.value() || tabState.value() == 0) {
-          state = (TrimState_TRIM_STATE)tabState.value();
+    if (tabState->getValue().length() > 0) {
+        int tabStateValue = *(tabState->getData()); // Get the value as int
+        if (tabStateValue || tabStateValue == 0) {
+            state = (TrimState_TRIM_STATE)tabStateValue;
         }
-      }
-
-      if (tabAngle.written()) {
-        if (tabAngle.value()) {
-          control_angle = tabAngle.value();
-        }
-      }
-
-      batteryLevel.writeValue(battery.level());
-
-      if (battery.level() < 20) {
-        batteryWarning = true;
-      }else{
-        batteryWarning = false;
-      }
-
-      if (windAngle) {
-        windDirection.writeValue(windAngle);
-      }
-
-      servoTimer.tick();
-      LEDTimer.tick();
     }
 
-    bleConnected = false;
-    Serial.println("Client disconnected");
-  }
-  
-  servoTimer.tick();
-  LEDTimer.tick();
+    if (tabAngle->getValue().length() > 0) {
+        int tabAngleValue = *(tabAngle->getData()); // Get the value as int
+        control_angle = tabAngleValue;
+    }
+
+    // Writing to a characteristic is similar to Arduino BLE
+    std::string batteryLevelValue = std::to_string(battery.level());
+    batteryLevel->setValue(batteryLevelValue);
+    batteryLevel->notify(); // Notify if needed
+
+    if (battery.level() < 20) {
+        batteryWarning = true;
+    } else {
+        batteryWarning = false;
+    }
+
+    if (windAngle) {
+        windDirection->setValue(std::to_string(windAngle));
+        windDirection->notify(); // Notify if needed
+    }
+
+    servoTimer.tick();
+    LEDTimer.tick();
 }
 
 /**
@@ -335,6 +359,7 @@ bool blinkState(void *)
       break;
     default:
       // Water is wet
+      // No, it's not.
       break;
   }
 
