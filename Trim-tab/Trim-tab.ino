@@ -58,6 +58,18 @@ volatile float windAngle;                     // Mapped reading from wind direct
 int control_angle;                            // The current angle that the servo is set to
 TrimState_TRIM_STATE state;                   // The variable responsible for knowing what state the trim tab is in
 
+class ServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer, esp_ble_gatts_cb_param_t *param) {
+        BLEAddress clientAddress = BLEAddress(param->connect.remote_bda);
+        Serial.println(("Connected to client: " + clientAddress.toString()).c_str());
+    }
+
+    void onDisconnect(BLEServer* pServer) {
+        Serial.println("Client disconnected");
+        pServer->startAdvertising();
+    }
+};
+
 void setup()
 {
   /* Setting the mode of the pins necessary */
@@ -96,6 +108,7 @@ void setup()
 
   BLEDevice::init("Sailbot - Trim Tab"); // Name your device
   BLEServer *pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new ServerCallbacks());
   //BLE.setAdvertisedService(sttService);           // Sets the primary advertised service
   BLEService *sttService = pServer->createService("1819");
   BLEService *batteryService = pServer->createService("180F");
@@ -105,7 +118,7 @@ void setup()
   //Serial.println(BLE.address());
   
   // Create BLE Characteristics
-  windDirection = batteryService->createCharacteristic(
+  windDirection = sttService->createCharacteristic(
                                     "2A73",
                                     BLECharacteristic::PROPERTY_READ | 
                                     BLECharacteristic::PROPERTY_NOTIFY
@@ -134,6 +147,7 @@ void setup()
 
   
   windDirection->addDescriptor(new BLE2902());
+  windDirection->setAccessPermissions(ESP_GATT_PERM_READ);
   batteryLevel->addDescriptor(new BLE2902());
   int current_state = state;
   tabState->setValue(current_state);
@@ -148,7 +162,7 @@ void setup()
   pAdvertising->addServiceUUID(deviceInfoService->getUUID());
   pAdvertising->setScanResponse(true);
   pAdvertising->setMinPreferred(0x06);  // Functions that help with iPhone connections issue
-  BLEDevice::startAdvertising();                               // Start BLE
+  pServer->startAdvertising();                            // Start BLE
   Serial.println("BLE: Advertising");
 
   versionString->setValue("2.0.2");              // Software version
@@ -204,6 +218,7 @@ void loop()
  */
 bool servoControl(void *)
 {
+  //Serial.println("In servo control");
   // Read, format, and scale angle of attack reading from the encoder
   windAngle = analogRead(potPin) - POT_HEADWIND;                                            // reads angle of attack data and centers values on headwind
   windAngle = windAngle < 0 ? POT_HEADWIND + windAngle + (1023 - POT_HEADWIND) : windAngle; // wraps angle around
